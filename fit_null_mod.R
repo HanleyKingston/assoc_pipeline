@@ -20,6 +20,7 @@ library(SeqArray)
 library(SeqVarTools)
 library(Biobase)
 library(GENESIS)
+library(dplyr)
 sessionInfo()
 print(argv)
 
@@ -31,8 +32,10 @@ if (!is.na(argv$sample_id)) {
   sample_id <- NULL
 }
 
-if (is.na(argv$covars[1])) {
-  argv$covars <- NULL
+if (!is.na(argv$covars)) {
+  covars <- strsplit(argv$covars, " ") %>% unlist
+} else {
+  covars <- NULL
 }
 
 if (!is.na(argv$grm_file)) {
@@ -41,7 +44,7 @@ if (!is.na(argv$grm_file)) {
     grm <- NULL
 }
 
-nullmod <- fitNullModel(pheno, outcome = argv$outcome, covars = argv$covars,
+nullmod <- fitNullModel(pheno, outcome = argv$outcome, covars = covars,
                         cov.mat = grm, family = argv$family, verbose=FALSE,
                         sample.id = sample_id)
 
