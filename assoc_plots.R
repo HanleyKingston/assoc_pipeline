@@ -4,8 +4,12 @@ library(argparser)
 argp <- arg_parser("Association plots")
 argp <- add_argument(argp, "assoc_file",
                      help = "Association test results file (.rds)")
-argp <- add_argument(argp, "--out_prefix", help = "Prefix for output files",
-                     default = "")
+argp <- add_argument(argp, "--out_prefix", help = "Prefix for output files", default = "")
+argp <- add_argument(argp, "--signif", help = "significance levels for Manhattan plot, as a space-seperated list")
+argp <- add_argument(argp, "--autosome_only", help = "only run on autosomes - note: will supercede the chromosome argument. Lambda will be calculated only on autosomes", flag = TRUE)
+#argp <- add_argument(argp, "--annotate", help = "p-value threhsold below which to annotate peaks", default = "NULL")
+#argp <- add_argument(argp, "--gds_for_rsid", help = "gds file. If provided, will be used to extract rsID for annotation", default = "NA")
+
 argv <- parse_args(argp)
 
 sessionInfo()
@@ -23,7 +27,33 @@ calculateLambda <- function(stat, df) {
 
 assoc <- readRDS(argv$assoc_file)
 
+if(argv$autosome_only == TRUE)  { assoc <- assoc[grep("[[:digit:]]", assoc$chr),] }
+
+#Re-order chromosomes to be in numerical order
+chrOrder <-c((1:22),"M","m","MT","mt","X","x","Y","y","XY","xy","23","24","0","NA")
+if(any(!(assoc$chr %in% chrOrder))){
+    stop("Error: unrecognized chromosome name")
+}
+assoc$chr <- factor(assoc$chr, chrOrder, ordered=TRUE)
+assoc <- assoc[!is.na(assoc$chr),]
+
+
+if(argv$autosome_only == TRUE)  { print("lambda calculated on autosomes only") }
 lambda <- calculateLambda((assoc$Score.Stat)^2, df=1)
+
+
+#If gds is provided, add rsIDs from gds to annot
+#if(!is.na(gds_for_rsid)){
+#library(SeqArray)
+#library(GENESIS)
+#gds <- seqOpen("gds_for_rsid")
+#}
+
+if (!is.na(argv$signif)) {
+  signif <- strsplit(argv$signif, " ") %>% unlist %>% as.numeric()
+} else {
+  signif <- c(5e-8, 5e-9, 1e-9)
+}
 
 ## qq plot
 n <- nrow(assoc)
@@ -45,17 +75,28 @@ p <- ggplot(dat, aes(-log10(exp), -log10(obs))) +
     theme(plot.title = element_text(size = 22))
 ggsave(paste0(argv$out_prefix, "qq.png"), plot=p, width=6, height=6)
 
+
+if(min(assoc$Score.pval) < 5e-10){
+p <- ggplot(dat, aes(-log10(exp), -log10(obs))) +
+    geom_line(aes(-log10(exp), -log10(upper)), color="gray") +
+    geom_line(aes(-log10(exp), -log10(lower)), color="gray") +
+    geom_point() +
+    geom_abline(intercept=0, slope=1, color="red") +
+    xlab(expression(paste(-log[10], "(expected P)"))) +
+    ylab(expression(paste(-log[10], "(observed P)"))) +
+    ylim(0,10) +
+    ggtitle(paste("lambda =", format(lambda, digits=4, nsmall=3))) +
+    theme_bw() +
+    theme(plot.title = element_text(size = 22))
+ggsave(paste0(argv$out_prefix, "qq_truncated.png"), plot=p, width=6, height=6)
+}
+
 rm(dat)
 
 
 ## manhattan plot
-assoc <- mutate(assoc, chr=factor(chr, levels=c(0:26,"X","XY","Y")))
-chr <- levels(droplevels(assoc$chr))
+chr <- as.factor(assoc$chr) %>% levels()
 cmap <- setNames(rep_len(brewer.pal(8, "Dark2"), length(chr)), chr)
-
-# significance level
-## genome-wide significance
-signif <- c(5e-8, 5e-9, 1e-9)
 
 p <- ggplot(assoc, aes(chr, -log10(Score.pval), group=interaction(chr, pos), color=chr)) +
     geom_point(position=position_dodge(0.8)) +
@@ -65,4 +106,20 @@ p <- ggplot(assoc, aes(chr, -log10(Score.pval), group=interaction(chr, pos), col
     theme(legend.position="none") +
     theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
     xlab("chromosome") + ylab(expression(-log[10](p)))
-ggsave(paste0(argv$out_prefix, "manh.png"), plot=p, width=10, height=5)
+ggsave(paste0(argv$out_prefix, "mannh.png"), plot=p, width=10, height=5)
+
+
+if(min(assoc$Score.pval) < 5e-10){
+p <- ggplot(assoc, aes(chr, -log10(Score.pval), group=interaction(chr, pos), color=chr)) +
+    geom_point(position=position_dodge(0.8)) +
+    scale_color_manual(values=cmap, breaks=names(cmap)) +
+    geom_hline(yintercept=-log10(signif), linetype='dashed') +
+    ylim(0,10) +
+    theme_bw() +
+    theme(legend.position="none") +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+    xlab("chromosome") + ylab(expression(-log[10](p)))
+ggsave(paste0(argv$out_prefix, "mannh_truncated.png"), plot=p, width=10, height=5)
+}
+
+
